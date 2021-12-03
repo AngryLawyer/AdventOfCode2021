@@ -11,12 +11,9 @@ let number_of_increases data_as_numbers =
   let zipped = List.zip_exn todays yesterdays in
   let result = List.map zipped ~f:(fun (today, yesterday) ->
     match today, yesterday with
-    | None, _ -> NA
-    | _ , None -> NA
-    | Some today, Some yesterday when today = yesterday -> NA
     | Some today, Some yesterday when today < yesterday -> Decrease
     | Some today, Some yesterday when today > yesterday -> Increase
-    | _ -> failwith "This should never happen"
+    | _ -> NA
   ) in
   List.fold (List.map result ~f:(function
       | Increase -> 1
