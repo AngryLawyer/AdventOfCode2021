@@ -3,4 +3,13 @@
  (libraries
   core
  )
+ (modules day1)
+)
+
+(executable
+ (name day2)
+ (libraries
+  core
+ )
+ (modules day2)
 )
