@@ -21,3 +21,11 @@
  )
  (modules day3)
 )
+
+(executable
+ (name day4)
+ (libraries
+  core
+ )
+ (modules day4)
+)
