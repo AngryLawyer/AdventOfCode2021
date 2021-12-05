@@ -2,92 +2,119 @@ open Core
 
 type draw_order = int list
 
-type bingo_table = int list list
+module Board = struct
+  let board_rows board =
+    List.groupi board ~break:(fun idx _ _ -> idx % 5 = 0)
 
-(* Parsing subsystem *)
+  let board_columns board =
+    let rows = board_rows board in
+    List.transpose_exn rows
 
-let parse_line line_text =
-  let split = String.split ~on:' ' line_text in
-  let filtered = List.filter split ~f:(fun x -> String.(<>) x "") in
-  List.map filtered ~f:Int.of_string
+  let find_unmarked board called =
+    let board_set = Set.of_list (module Int) board in
+    let called_set = Set.of_list (module Int) called in
+    Set.diff board_set called_set
 
-let rec parse_board lines board boards call_order =
-  match lines with
-  | _ when (List.length board) = 5 -> parse_boards lines ((List.rev board) :: boards) call_order
-  | head :: rest -> (
-      let line = parse_line head in
-      parse_board rest (line :: board) boards call_order
-  )
-  | _ -> failwith "Ran out of input"
+  let find_win rows called =
+    List.exists rows ~f:(fun row ->
+      let row_set = Set.of_list (module Int) row in
+      let called_set = Set.of_list (module Int) called in
+      Set.is_subset row_set ~of_:called_set
+    )
 
-and parse_boards lines boards call_order =
-  match lines with
-  | [] -> boards, call_order
-  | "" :: rest -> parse_board rest [] boards call_order
-  | x :: _ -> failwith (sprintf "Unexpected input %s" x)
+  let row_win board called =
+    let rows = board_rows board in
+    find_win rows called
 
-let parse_order lines =
-  match lines with
-  | line :: rest -> 
-    let split = String.split line ~on:',' in
-    let call_order = List.map split ~f:Int.of_string in
-    parse_boards rest [] call_order
-  | _ -> failwith "Ran out of input"
+  let column_win board called =
+    let columns = board_columns board in
+    find_win columns called
 
-let parse lines =
-  parse_order lines
+  let is_winner board called =
+    (row_win board called) || (column_win board called)
+end
+
+module Print = struct
+  let print_board board =
+    let rows = Board.board_rows board in
+    List.iter rows ~f:(fun row ->
+      let printable = String.concat ~sep:" " (List.map row ~f:(fun x -> sprintf "%d" x)) in
+      printf "%s\n" printable
+    );
+    printf "\n"
+end
+
+
+module Parse = struct
+  let parse_line line_text =
+    let split = String.split ~on:' ' line_text in
+    let filtered = List.filter split ~f:(fun x -> String.(<>) x "") in
+    List.map filtered ~f:Int.of_string
+
+  let rec parse_board lines board boards call_order =
+    match (List.length board), lines with
+    | 25, _ -> parse_boards lines (board :: boards) call_order
+    | _, hd :: tl ->
+        parse_board tl (board @ (parse_line hd)) boards call_order
+    | _, _ -> failwith "Ran out of input for boards"
+
+  and parse_boards lines boards call_order =
+    match lines with
+    | [] -> (List.rev boards), call_order
+    | _ -> parse_board lines [] boards call_order
+
+  let parse_order lines =
+    match lines with
+    | line :: rest -> 
+      let split = String.split line ~on:',' in
+      let call_order = List.map split ~f:Int.of_string in
+      parse_boards rest [] call_order
+    | _ -> failwith "Ran out of input"
+
+  let parse lines =
+    parse_order lines
+end
 
 (* main code *)
-let row_win board called =
-  List.exists board ~f:(fun row ->
-    let row_set = Set.of_list (module Int) row in
-    let called_set = Set.of_list (module Int) called in
-    Set.is_subset row_set ~of_:called_set
-  )
 
-let column_win board called =
-  let rotated = match board with
-  | a :: b :: c :: d :: e :: [] ->
-    List.map (List.range 0 5) ~f:(fun idx ->
-        [
-          List.nth_exn a idx;
-          List.nth_exn b idx;
-          List.nth_exn c idx;
-          List.nth_exn d idx;
-          List.nth_exn e idx
-        ]
-    )
-  | _ -> failwith "Board does not have the right number of rows"
-  in
-  row_win rotated called
+let find_winners boards called =
+  List.partition_tf boards ~f:(fun board -> Board.is_winner board called)
 
-let is_winner board called =
-  (row_win board called) || (column_win board called)
+let rec order_winners_inner winning_boards remaining_boards called_numbers remaining_numbers =
+  match remaining_numbers, remaining_boards with
+  | [], _ | _, [] -> (List.rev winning_boards)
+  | hd :: tl, _ -> 
+    let next_winners, next_remaining = find_winners remaining_boards called_numbers in
+    let winners_with_called = List.map next_winners ~f:(fun winner -> winner, called_numbers) in
+    order_winners_inner (winners_with_called @ winning_boards) next_remaining (hd :: called_numbers) tl
 
-let find_unmarked board called =
-  let concat = List.concat board in
-  let board_set = Set.of_list (module Int) concat in
-  let called_set = Set.of_list (module Int) called in
-  Set.diff board_set called_set
+let order_winners boards call_order =
+  order_winners_inner [] boards [] call_order
 
-let rec find_winner boards called remaining =
-  let winner = List.find boards ~f:(fun board ->
-      is_winner board called
-  ) in
-  match winner, remaining with
-  | Some w, _ ->
-    let unmarked = find_unmarked w called in
+let winner_hash board call_list =
+  match call_list with
+  | winning_call :: _ ->
+    let unmarked = Board.find_unmarked board call_list in
     let sum_unmarked = Set.fold unmarked ~f:(+) ~init:0 in
-    w, (List.hd_exn called), sum_unmarked
-  | None, [] -> failwith "No winner"
-  | None, next :: new_remaining -> (
-      find_winner boards (next :: called) new_remaining
-  )
-
+    winning_call * sum_unmarked
+  | _ -> failwith "Impossible win"
+  
+ 
 let challenge_1 data =
-  let boards, call_order = parse data in
-  let _winner, win_call, sum_unmarked = find_winner boards [] call_order in
-  win_call * sum_unmarked
+  let boards, call_order = Parse.parse data in
+  let win_order = order_winners boards call_order in
+  let winner, calls = List.hd_exn win_order in
+  printf "WINNER IS\n";
+  Print.print_board winner;
+  winner_hash winner calls
+
+let challenge_2 data =
+  let boards, call_order = Parse.parse data in
+  let win_order = order_winners boards call_order in
+  let winner, calls = List.hd_exn (List.rev win_order) in
+  printf "LOSER IS\n";
+  Print.print_board winner;
+  winner_hash winner calls
 
 let () =
   let data = In_channel.read_lines "day4.txt" in
@@ -113,4 +140,7 @@ let () =
   ] in
   let test_result = challenge_1 sample in
   assert (test_result = 4512);
-  printf "Challenge 1: %d\n" (challenge_1 data)
+  printf "Challenge 1: %d\n" (challenge_1 data);
+  let test_result_2 = challenge_2 sample in
+  assert (test_result_2 = 1924);
+  printf "Challenge 2: %d\n" (challenge_2 data);
